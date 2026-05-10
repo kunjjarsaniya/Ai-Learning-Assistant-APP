@@ -206,7 +206,7 @@ const RegisterPage = () => {
           {/* Google Sign-Up Button */}
           <GoogleSignInButton
             onSuccess={handleGoogleSuccess}
-            text="signup_with"
+            text="Continue with Google"
           />
 
           <div className="relative my-4 sm:my-5">

@@ -80,7 +80,7 @@ const LoginPage = () => {
           {/* Google Sign-In Button */}
           <GoogleSignInButton
             onSuccess={handleGoogleSuccess}
-            text="signin_with"
+            text="Continue with Google"
           />
 
           {/* Divider */}

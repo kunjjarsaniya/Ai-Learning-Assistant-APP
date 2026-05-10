@@ -12,16 +12,26 @@ const verifyGoogleAccessToken = async (accessToken) => {
         throw new Error('Google authentication is not configured');
     }
 
-    const response = await fetch(
-        `https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`
-    );
+    let response;
+    try {
+        response = await fetch(
+            `https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`
+        );
+    } catch (error) {
+        throw new Error('Failed to connect to Google authentication service');
+    }
 
     if (!response.ok) {
         const errorText = await response.text();
         throw new Error('Invalid Google access token: ' + errorText);
     }
 
-    const data = await response.json();
+    let data;
+    try {
+        data = await response.json();
+    } catch (error) {
+        throw new Error('Invalid response from Google authentication service');
+    }
 
     if (!data.email) {
         throw new Error('Google account has no email');
@@ -118,6 +128,32 @@ export const googleAuth = async (req, res, next) => {
                 statusCode: 401,
             });
         }
-        next(error);
+        if (error.message === 'Failed to connect to Google authentication service' ||
+            error.message === 'Invalid response from Google authentication service') {
+            return res.status(503).json({
+                success: false,
+                error: 'Authentication service temporarily unavailable. Please try again.',
+                statusCode: 503,
+            });
+        }
+        if (error.message === 'Google account has no email' || error.message === 'Google email is not verified') {
+            return res.status(400).json({
+                success: false,
+                error: error.message,
+                statusCode: 400,
+            });
+        }
+        if (error.name === 'ValidationError') {
+            return res.status(400).json({
+                success: false,
+                error: Object.values(error.errors).map(val => val.message).join(', '),
+                statusCode: 400,
+            });
+        }
+        res.status(500).json({
+            success: false,
+            error: 'Authentication failed. Please try again.',
+            statusCode: 500,
+        });
     }
 };
