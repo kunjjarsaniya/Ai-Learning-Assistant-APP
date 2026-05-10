@@ -10,69 +10,32 @@ const generateToken = (id) => {
 
 const verifyGoogleCredential = async (credential) => {
     if (!process.env.GOOGLE_CLIENT_ID) {
-        throw new Error('Google authentication is not configured');
+        throw new Error('Google auth not configured');
     }
 
     const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-    // Try verifying as an ID token (JWT from GoogleLogin / One Tap credential flow)
+    let ticket;
     try {
-        const ticket = await client.verifyIdToken({ idToken: credential });
-        const payload = ticket.getPayload();
-        if (!payload.email) {
-            throw new Error('Google account has no email');
-        }
-        if (!payload.email_verified) {
-            throw new Error('Google email is not verified');
-        }
-        return {
-            googleId: payload.sub,
-            email: payload.email,
-            username: payload.name || null,
-            profileImage: payload.picture || null,
-            emailVerified: payload.email_verified,
-        };
-    } catch (idError) {
-        // If it's our own custom error (email/verification), re-throw it
-        if (idError.message === 'Google account has no email' || idError.message === 'Google email is not verified') {
-            throw idError;
-        }
+        ticket = await client.verifyIdToken({ idToken: credential });
+    } catch (error) {
+        throw new Error('Invalid Google credential: ' + error.message);
     }
 
-    // Fallback: try as an access token (from useGoogleLogin implicit flow)
-    let tokenInfo;
-    try {
-        tokenInfo = await client.getTokenInfo(credential);
-    } catch (tokenError) {
-        throw new Error('Invalid Google credential');
-    }
-
-    if (!tokenInfo.email) {
+    const payload = ticket.getPayload();
+    if (!payload || !payload.email) {
         throw new Error('Google account has no email');
     }
-    if (!tokenInfo.email_verified) {
-        throw new Error('Google email is not verified');
-    }
-
-    let name = null;
-    let picture = null;
-    try {
-        client.setCredentials({ access_token: credential });
-        const response = await client.request({
-            url: 'https://www.googleapis.com/oauth2/v3/userinfo',
-        });
-        name = response.data.name || null;
-        picture = response.data.picture || null;
-    } catch (userInfoError) {
-        // Non-critical, proceed with defaults
+    if (!payload.email_verified) {
+        throw new Error('Google email not verified');
     }
 
     return {
-        googleId: tokenInfo.sub || credential,
-        email: tokenInfo.email,
-        username: name,
-        profileImage: picture,
-        emailVerified: tokenInfo.email_verified || false,
+        googleId: payload.sub,
+        email: payload.email,
+        username: payload.name || null,
+        profileImage: payload.picture || null,
+        emailVerified: payload.email_verified,
     };
 };
 
@@ -129,27 +92,40 @@ export const googleAuth = async (req, res, next) => {
                 },
                 token,
             },
-            message: user.email ? 'Logged in successfully' : 'Account created successfully',
+            message: 'Logged in successfully',
         });
     } catch (error) {
-        if (error.message === 'Google authentication is not configured') {
+        console.error('Google auth error:', {
+            message: error.message,
+            name: error.name,
+            code: error.code,
+        });
+
+        if (error.message === 'Google auth not configured') {
             return res.status(501).json({
                 success: false,
-                error: error.message,
+                error: 'Google authentication is not configured',
                 statusCode: 501,
             });
         }
-        if (error.message === 'Invalid Google credential') {
+        if (error.message.startsWith('Invalid Google credential')) {
             return res.status(401).json({
                 success: false,
-                error: 'Google authentication failed. Please try again.',
+                error: error.message,
                 statusCode: 401,
             });
         }
-        if (error.message === 'Google account has no email' || error.message === 'Google email is not verified') {
+        if (error.message === 'Google account has no email' || error.message === 'Google email not verified') {
             return res.status(400).json({
                 success: false,
                 error: error.message,
+                statusCode: 400,
+            });
+        }
+        if (error.name === 'CastError') {
+            return res.status(400).json({
+                success: false,
+                error: 'Invalid request',
                 statusCode: 400,
             });
         }
@@ -160,10 +136,10 @@ export const googleAuth = async (req, res, next) => {
                 statusCode: 400,
             });
         }
-        console.error('Google auth error:', error);
+
         res.status(500).json({
             success: false,
-            error: 'Authentication failed. Please try again.',
+            error: 'SERVER_ERROR: ' + error.message,
             statusCode: 500,
         });
     }
