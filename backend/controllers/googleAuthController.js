@@ -39,7 +39,7 @@ const verifyGoogleCredential = async (credential) => {
     };
 };
 
-export const googleAuth = async (req, res, next) => {
+export const googleAuth = async (req, res) => {
     try {
         const { credential } = req.body;
 
