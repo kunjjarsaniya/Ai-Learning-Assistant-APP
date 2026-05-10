@@ -39,19 +39,47 @@ const verifyGoogleCredential = async (credential) => {
     };
 };
 
-export const googleAuth = async (req, res) => {
-    try {
-        const { credential } = req.body;
+const verifyGoogleAccessToken = async (accessToken) => {
+    const response = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${accessToken}` },
+    });
 
-        if (!credential) {
+    if (!response.ok) {
+        throw new Error('Invalid Google credential: ' + response.statusText);
+    }
+
+    const data = await response.json();
+    if (!data || !data.email) {
+        throw new Error('Google account has no email');
+    }
+    if (!data.email_verified) {
+        throw new Error('Google email not verified');
+    }
+
+    return {
+        googleId: data.sub,
+        email: data.email,
+        username: data.name || null,
+        profileImage: data.picture || null,
+        emailVerified: data.email_verified,
+    };
+};
+
+export const googleAuth = async (req, res, next) => {
+    try {
+        const { credential, access_token } = req.body;
+
+        if (!credential && !access_token) {
             return res.status(400).json({
                 success: false,
-                error: 'Google credential is required',
+                error: 'Google credential or access token is required',
                 statusCode: 400,
             });
         }
 
-        const googleUser = await verifyGoogleCredential(credential);
+        const googleUser = credential
+            ? await verifyGoogleCredential(credential)
+            : await verifyGoogleAccessToken(access_token);
 
         let user = await User.findOne({ email: googleUser.email });
 

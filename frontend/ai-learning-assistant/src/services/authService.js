@@ -57,9 +57,9 @@ const changePassword = async (passwords) => {
 };
 
 
-const googleAuth = async (credential) => {
+const googleAuth = async (accessToken) => {
     try {
-        const response = await axiosInstance.post('/api/auth/google', { credential });
+        const response = await axiosInstance.post('/api/auth/google', { access_token: accessToken });
         return response.data;
     } catch (error) {
         throw error.response?.data || { message: 'Google authentication failed' };
