@@ -15,32 +15,64 @@ const verifyGoogleCredential = async (credential) => {
 
     const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-    let ticket;
+    // Try verifying as an ID token (JWT from GoogleLogin / One Tap credential flow)
     try {
-        ticket = await client.verifyIdToken({
-            idToken: credential,
-            audience: process.env.GOOGLE_CLIENT_ID,
-        });
-    } catch (error) {
+        const ticket = await client.verifyIdToken({ idToken: credential });
+        const payload = ticket.getPayload();
+        if (!payload.email) {
+            throw new Error('Google account has no email');
+        }
+        if (!payload.email_verified) {
+            throw new Error('Google email is not verified');
+        }
+        return {
+            googleId: payload.sub,
+            email: payload.email,
+            username: payload.name || null,
+            profileImage: payload.picture || null,
+            emailVerified: payload.email_verified,
+        };
+    } catch (idError) {
+        // If it's our own custom error (email/verification), re-throw it
+        if (idError.message === 'Google account has no email' || idError.message === 'Google email is not verified') {
+            throw idError;
+        }
+    }
+
+    // Fallback: try as an access token (from useGoogleLogin implicit flow)
+    let tokenInfo;
+    try {
+        tokenInfo = await client.getTokenInfo(credential);
+    } catch (tokenError) {
         throw new Error('Invalid Google credential');
     }
 
-    const payload = ticket.getPayload();
-
-    if (!payload.email) {
+    if (!tokenInfo.email) {
         throw new Error('Google account has no email');
     }
-
-    if (!payload.email_verified) {
+    if (!tokenInfo.email_verified) {
         throw new Error('Google email is not verified');
     }
 
+    let name = null;
+    let picture = null;
+    try {
+        client.setCredentials({ access_token: credential });
+        const response = await client.request({
+            url: 'https://www.googleapis.com/oauth2/v3/userinfo',
+        });
+        name = response.data.name || null;
+        picture = response.data.picture || null;
+    } catch (userInfoError) {
+        // Non-critical, proceed with defaults
+    }
+
     return {
-        googleId: payload.sub,
-        email: payload.email,
-        username: payload.name || null,
-        profileImage: payload.picture || null,
-        emailVerified: payload.email_verified,
+        googleId: tokenInfo.sub || credential,
+        email: tokenInfo.email,
+        username: name,
+        profileImage: picture,
+        emailVerified: tokenInfo.email_verified || false,
     };
 };
 
