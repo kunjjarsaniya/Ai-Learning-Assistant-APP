@@ -1,4 +1,5 @@
 import jwt from 'jsonwebtoken';
+import { OAuth2Client } from 'google-auth-library';
 import User from '../models/User.js';
 
 const generateToken = (id) => {
@@ -12,41 +13,42 @@ const verifyGoogleAccessToken = async (accessToken) => {
         throw new Error('Google authentication is not configured');
     }
 
-    let response;
+    const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
+
+    let tokenInfo;
     try {
-        response = await fetch(
-            `https://www.googleapis.com/oauth2/v3/userinfo?access_token=${accessToken}`
-        );
+        tokenInfo = await client.getTokenInfo(accessToken);
     } catch (error) {
-        throw new Error('Failed to connect to Google authentication service');
+        throw new Error('Invalid Google access token');
     }
 
-    if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error('Invalid Google access token: ' + errorText);
-    }
-
-    let data;
-    try {
-        data = await response.json();
-    } catch (error) {
-        throw new Error('Invalid response from Google authentication service');
-    }
-
-    if (!data.email) {
+    if (!tokenInfo.email) {
         throw new Error('Google account has no email');
     }
 
-    if (!data.email_verified) {
+    if (!tokenInfo.email_verified) {
         throw new Error('Google email is not verified');
     }
 
+    let name = null;
+    let picture = null;
+    try {
+        client.setCredentials({ access_token: accessToken });
+        const response = await client.request({
+            url: 'https://www.googleapis.com/oauth2/v3/userinfo',
+        });
+        name = response.data.name || null;
+        picture = response.data.picture || null;
+    } catch (error) {
+        // Userinfo is non-critical; proceed with defaults
+    }
+
     return {
-        googleId: data.sub,
-        email: data.email,
-        username: data.name,
-        profileImage: data.picture,
-        emailVerified: data.email_verified,
+        googleId: tokenInfo.sub,
+        email: tokenInfo.email,
+        username: name,
+        profileImage: picture,
+        emailVerified: tokenInfo.email_verified,
     };
 };
 
@@ -63,14 +65,6 @@ export const googleAuth = async (req, res, next) => {
         }
 
         const googleUser = await verifyGoogleAccessToken(credential);
-
-        if (!googleUser.emailVerified) {
-            return res.status(400).json({
-                success: false,
-                error: 'Google email is not verified',
-                statusCode: 400,
-            });
-        }
 
         let user = await User.findOne({ email: googleUser.email });
 
@@ -121,19 +115,11 @@ export const googleAuth = async (req, res, next) => {
                 statusCode: 501,
             });
         }
-        if (error.message.startsWith('Invalid Google access token')) {
+        if (error.message === 'Invalid Google access token') {
             return res.status(401).json({
                 success: false,
                 error: 'Google authentication failed. Please try again.',
                 statusCode: 401,
-            });
-        }
-        if (error.message === 'Failed to connect to Google authentication service' ||
-            error.message === 'Invalid response from Google authentication service') {
-            return res.status(503).json({
-                success: false,
-                error: 'Authentication service temporarily unavailable. Please try again.',
-                statusCode: 503,
             });
         }
         if (error.message === 'Google account has no email' || error.message === 'Google email is not verified') {
@@ -150,6 +136,7 @@ export const googleAuth = async (req, res, next) => {
                 statusCode: 400,
             });
         }
+        console.error('Google auth error:', error);
         res.status(500).json({
             success: false,
             error: 'Authentication failed. Please try again.',
