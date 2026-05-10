@@ -8,47 +8,39 @@ const generateToken = (id) => {
     });
 };
 
-const verifyGoogleAccessToken = async (accessToken) => {
+const verifyGoogleCredential = async (credential) => {
     if (!process.env.GOOGLE_CLIENT_ID) {
         throw new Error('Google authentication is not configured');
     }
 
     const client = new OAuth2Client(process.env.GOOGLE_CLIENT_ID);
 
-    let tokenInfo;
+    let ticket;
     try {
-        tokenInfo = await client.getTokenInfo(accessToken);
+        ticket = await client.verifyIdToken({
+            idToken: credential,
+            audience: process.env.GOOGLE_CLIENT_ID,
+        });
     } catch (error) {
-        throw new Error('Invalid Google access token');
+        throw new Error('Invalid Google credential');
     }
 
-    if (!tokenInfo.email) {
+    const payload = ticket.getPayload();
+
+    if (!payload.email) {
         throw new Error('Google account has no email');
     }
 
-    if (!tokenInfo.email_verified) {
+    if (!payload.email_verified) {
         throw new Error('Google email is not verified');
     }
 
-    let name = null;
-    let picture = null;
-    try {
-        client.setCredentials({ access_token: accessToken });
-        const response = await client.request({
-            url: 'https://www.googleapis.com/oauth2/v3/userinfo',
-        });
-        name = response.data.name || null;
-        picture = response.data.picture || null;
-    } catch (error) {
-        // Userinfo is non-critical; proceed with defaults
-    }
-
     return {
-        googleId: tokenInfo.sub,
-        email: tokenInfo.email,
-        username: name,
-        profileImage: picture,
-        emailVerified: tokenInfo.email_verified,
+        googleId: payload.sub,
+        email: payload.email,
+        username: payload.name || null,
+        profileImage: payload.picture || null,
+        emailVerified: payload.email_verified,
     };
 };
 
@@ -64,7 +56,7 @@ export const googleAuth = async (req, res, next) => {
             });
         }
 
-        const googleUser = await verifyGoogleAccessToken(credential);
+        const googleUser = await verifyGoogleCredential(credential);
 
         let user = await User.findOne({ email: googleUser.email });
 
@@ -115,7 +107,7 @@ export const googleAuth = async (req, res, next) => {
                 statusCode: 501,
             });
         }
-        if (error.message === 'Invalid Google access token') {
+        if (error.message === 'Invalid Google credential') {
             return res.status(401).json({
                 success: false,
                 error: 'Google authentication failed. Please try again.',

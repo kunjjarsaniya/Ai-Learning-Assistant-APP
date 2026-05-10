@@ -35,10 +35,10 @@ const LoginPage = () => {
     }
   };
 
-  const handleGoogleSuccess = async (tokenResponse) => {
+  const handleGoogleSuccess = async (credentialResponse) => {
     try {
       setError('');
-      const res = await authService.googleAuth(tokenResponse.access_token);
+      const res = await authService.googleAuth(credentialResponse.credential);
       const { token, user } = res.data;
       login(user, token);
       toast.success('Logged in with Google');
